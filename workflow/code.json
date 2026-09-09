@@ -1,0 +1,905 @@
+{
+  "name": "Ai job finder -Upload resume",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "6ace7eed-b47e-42f8-9f5f-9fae1c577ec2",
+        "formTitle": "AI Job Finder",
+        "formDescription": "Upload your resume PDF. Searches India, Remote and Worldwide automatically.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Resume",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3eab27f6-2660-4571-b7f2-bba5f62c413c",
+      "name": "Upload Resume",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -384
+      ],
+      "webhookId": "6ace7eed-b47e-42f8-9f5f-9fae1c577ec2"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "Resume",
+        "options": {}
+      },
+      "id": "ba92dfab-9edb-4324-98ca-174d755c96f3",
+      "name": "Extract Resume Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw =\n  $json.candidates?.[0]?.content?.parts?.[0]?.text ??\n  $json.body?.candidates?.[0]?.content?.parts?.[0]?.text ??\n  '';\n\nlet profile = {};\ntry {\n  let s = String(raw).trim()\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/\\s*```$/i, '');\n  const a = s.indexOf('{');\n  const b = s.lastIndexOf('}');\n  if (a >= 0 && b > a) s = s.slice(a, b + 1);\n  profile = JSON.parse(s);\n} catch (e) {\n  throw new Error('Could not parse Gemini profile JSON: ' + e.message + '\\nRaw: ' + raw);\n}\n\nconst arr = (v) => Array.isArray(v)\n  ? v.filter(x => x !== null && x !== undefined && String(x).trim() !== '').map(String)\n  : [];\nconst text = (v) => v === null || v === undefined ? '' : String(v);\n\nprofile.name = text(profile.name);\nprofile.email = text(profile.email);\nprofile.phone = text(profile.phone);\nprofile.education = text(profile.education);\nprofile.experience = text(profile.experience);\nprofile.skills = arr(profile.skills);\nprofile.projects = arr(profile.projects);\nprofile.preferred_roles = arr(profile.preferred_roles);\nprofile.preferred_locations = arr(profile.preferred_locations);\nprofile.work_mode = text(profile.work_mode);\nprofile.years_experience = text(profile.years_experience);\n\nreturn [{\n  json: {\n    profile,\n    resume_text: String($('Extract Resume Text').first().json.text || '')\n  }\n}];"
+      },
+      "id": "b93d2d75-1015-463b-97dd-381e1c56b645",
+      "name": "Parse Candidate Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $json.profile || $json;\n\nconst clean = (a) => {\n  if (!Array.isArray(a)) return [];\n  \n  return [...new Set(\n    a\n      .map(x => {\n        if (typeof x === 'string') return x.trim();\n        if (x && typeof x === 'object') {\n          return String(x.name || x.title || x.role || '').trim();\n        }\n        return '';\n      })\n      .filter(Boolean)\n  )];\n};\n\nconst roles = clean(\n  p.preferred_roles ||\n  p.target_roles ||\n  p.job_roles ||\n  p.desired_roles\n);\n\nconst skills = clean(p.skills);\n\nconst locations = clean(\n  p.preferred_locations ||\n  p.locations\n);\n\nconst projects = clean(p.projects);\n\nconst workMode = String(p.work_mode || '').trim();\n\nconst experience = String(p.years_experience || '').trim();\n\nconst education = String(p.education || '').trim();\n\nreturn [{\n  json: {\n    profile: p,\n    resume_text: $json.resume_text || '',\n\n    searchRoles: roles.slice(0, 6),\n\n    searchLocations: locations.length\n      ? locations.slice(0, 6)\n      : ['India', 'Remote', 'Worldwide'],\n\n    skillText: skills.slice(0, 15).join(', '),\n\n    roleText: roles.join(', '),\n\n    experience,\n\n    education,\n\n    projectText: projects.slice(0, 8).join(', '),\n\n    workMode,\n\n    minMatch: 70,\n\n    maxJobsToMatch: 120\n  }\n}];"
+      },
+      "id": "f4d42e6c-d7a1-4a86-8ea7-d3e75ab9ad0b",
+      "name": "Automatic Search Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const roles = Array.isArray($json.searchRoles)\n  ? $json.searchRoles\n  : [];\n\nconst locations = Array.isArray($json.searchLocations)\n  ? $json.searchLocations\n  : ['India', 'Remote', 'Worldwide'];\n\nconst profile = $json.profile || {};\n\nconst queries = [];\n\nfor (const role of roles) {\n  for (const location of locations) {\n    queries.push({\n      json: {\n        query: `site:cutshort.io/job/ ${role} ${location}`,\n        role: role,\n        location: location,\n        candidate_profile: profile\n      }\n    });\n  }\n}\n\nreturn queries;"
+      },
+      "id": "2edd077e-3198-4863-bc5b-783f889bcb1f",
+      "name": "Create Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  query: $json.query,\n  search_depth: \"advanced\",\n  topic: \"general\",\n  max_results: 10,\n  include_answer: false,\n  include_raw_content: true\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "d54e593b-a0c8-450c-a3b5-ed5041265f57",
+      "name": "Search Real Job Listings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1888,
+        -384
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const responses = $input.all();\nconst queries = $('Create Search Queries').all();\n\n// Get the original resume text once.\n// .first() avoids the paired-item problem.\nconst resumeText = $('Extract Resume Text').first().json.text || '';\n\nconst output = [];\n\nfor (let i = 0; i < responses.length; i++) {\n\n  const response = responses[i]?.json || {};\n  const q = queries[i]?.json || {};\n\n  const results = Array.isArray(response.results)\n    ? response.results\n    : [];\n\n  for (const r of results) {\n\n    if (!r?.url) continue;\n\n    output.push({\n      json: {\n        url: String(r.url).split('#')[0],\n        title: r.title || '',\n        snippet: r.content || '',\n        rawContent: r.raw_content || '',\n\n        searchRole: q.role || '',\n        searchLocation: q.location || '',\n\n        profile: q.profile || {},\n\n        // ⭐ Add the full resume to every job\n        candidate_resume: resumeText\n      }\n    });\n\n  }\n}\n\nreturn output;"
+      },
+      "id": "10ad5307-b9fe-4139-9abb-0384e15c7b21",
+      "name": "Extract Job Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const seen = new Set(); const out = []; for (const item of $input.all()) { const u = String(item.json.url || '').trim(); if (!u || seen.has(u)) continue; seen.add(u); out.push(item); } return out.slice(0, 10);"
+      },
+      "id": "7ae15277-3a47-434b-8be3-4adf7f7561d8",
+      "name": "Remove Duplicates + Limit Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PARSE MATCH - ROBUST FINAL VERSION\n// ============================================================\n\nconst items = $input.all();\n\n// ============================================================\n// URL CLEANER\n// ============================================================\n\nfunction cleanUrl(value) {\n  if (!value) return \"\";\n\n  let url = String(value).trim();\n\n  // Remove Markdown URL format:\n  // [https://example.com](https://example.com)\n  const markdownMatch = url.match(/\\]\\((https?:\\/\\/[^)\\s]+)\\)/);\n\n  if (markdownMatch) {\n    return markdownMatch[1].trim();\n  }\n\n  // Extract normal URL if extra text exists\n  const plainUrl = url.match(/https?:\\/\\/[^\\s)\\]\"']+/);\n\n  if (plainUrl) {\n    return plainUrl[0].trim();\n  }\n\n  return url;\n}\n\n// ============================================================\n// GEMINI JSON PARSER\n// ============================================================\n\nfunction parseGeminiText(value) {\n  if (!value) return null;\n\n  // Already an object\n  if (typeof value === \"object\") {\n    return value;\n  }\n\n  let text = String(value).trim();\n\n  // Remove Markdown code fences\n  text = text\n    .replace(/^```json\\s*/i, \"\")\n    .replace(/^```\\s*/i, \"\")\n    .replace(/\\s*```$/i, \"\")\n    .trim();\n\n  // Find JSON object if Gemini added extra text\n  const firstBrace = text.indexOf(\"{\");\n  const lastBrace = text.lastIndexOf(\"}\");\n\n  if (firstBrace !== -1 && lastBrace !== -1) {\n    text = text.substring(firstBrace, lastBrace + 1);\n  }\n\n  try {\n    return JSON.parse(text);\n  } catch (error) {\n    return null;\n  }\n}\n\n// ============================================================\n// PROCESS ITEMS\n// ============================================================\n\nconst output = [];\n\nfor (const item of items) {\n\n  const input = item.json;\n\n  // ==========================================================\n  // FIND GEMINI RESPONSE\n  // ==========================================================\n\n  let parsed = null;\n\n  // Gemini response normally comes in \"text\"\n  if (input.text) {\n    parsed = parseGeminiText(input.text);\n  }\n\n  // Alternative output field\n  if (!parsed && input.output) {\n    parsed = parseGeminiText(input.output);\n  }\n\n  // Alternative response field\n  if (!parsed && input.response) {\n    parsed = parseGeminiText(input.response);\n  }\n\n  // If item already contains parsed fields\n  if (!parsed && input.job_title) {\n    parsed = input;\n  }\n\n  // ==========================================================\n  // IF GEMINI RESPONSE CANNOT BE PARSED\n  // SKIP THE BAD ITEM\n  // ==========================================================\n\n  if (!parsed) {\n    continue;\n  }\n\n  // ==========================================================\n  // JOB URL\n  // ==========================================================\n\n  const jobUrl = cleanUrl(\n    parsed.job_url ||\n    input.individual_job_url ||\n    input.original_job_url ||\n    input.url ||\n    \"\"\n  );\n\n  // ==========================================================\n  // FINAL CLEAN OUTPUT\n  // ==========================================================\n\n  output.push({\n    json: {\n\n      job_title: parsed.job_title || \"\",\n\n      company: parsed.company || \"\",\n\n      job_url: jobUrl,\n\n      location: parsed.location || \"\",\n\n      work_mode: parsed.work_mode || \"\",\n\n      experience_required:\n        parsed.experience_required || \"\",\n\n      // ========================================================\n      // MATCH SCORE\n      // ========================================================\n\n      match_score: Number(parsed.match_score) || 0,\n\n      eligible: Boolean(parsed.eligible),\n\n      is_individual_job:\n        Boolean(parsed.is_individual_job),\n\n      // ========================================================\n      // INDIVIDUAL SCORES\n      // ========================================================\n\n      role_match:\n        Number(parsed.role_match) || 0,\n\n      skill_match:\n        Number(parsed.skill_match) || 0,\n\n      experience_match:\n        Number(parsed.experience_match) || 0,\n\n      project_match:\n        Number(parsed.project_match) || 0,\n\n      education_match:\n        Number(parsed.education_match) || 0,\n\n      location_workmode_match:\n        Number(parsed.location_workmode_match) || 0,\n\n      // ========================================================\n      // SKILLS\n      // Convert arrays to readable text for Google Sheets\n      // ========================================================\n\n      matched_skills:\n        Array.isArray(parsed.matched_skills)\n          ? parsed.matched_skills.join(\", \")\n          : String(parsed.matched_skills || \"\"),\n\n      missing_skills:\n        Array.isArray(parsed.missing_skills)\n          ? parsed.missing_skills.join(\", \")\n          : String(parsed.missing_skills || \"\"),\n\n      required_skills_missing:\n        Array.isArray(parsed.required_skills_missing)\n          ? parsed.required_skills_missing.join(\", \")\n          : String(parsed.required_skills_missing || \"\"),\n\n      preferred_skills_missing:\n        Array.isArray(parsed.preferred_skills_missing)\n          ? parsed.preferred_skills_missing.join(\", \")\n          : String(parsed.preferred_skills_missing || \"\"),\n\n      // ========================================================\n      // REASON\n      // ========================================================\n\n      reason: parsed.reason || \"\"\n    }\n  });\n}\n\n// ============================================================\n// RETURN FINAL ITEMS\n// ============================================================\n\nreturn output;"
+      },
+      "id": "db1f43c0-69f1-4380-9ab2-e7f34ed42c7e",
+      "name": "Parse Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a",
+              "leftValue": "={{ $json.is_individual_job }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            },
+            {
+              "id": "b",
+              "leftValue": "={{Number($json.match_score)}}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "c",
+              "leftValue": "={{$json.eligible}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d99fd16a-c10a-48af-a148-a2b458812d46",
+      "name": "Active + Eligible + 70%",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().sort((a,b) => Number(b.json.match_score || 0) - Number(a.json.match_score || 0)).slice(0, 20);"
+      },
+      "id": "e5fbf318-f2b5-4bae-b6e7-d7e13b97cefa",
+      "name": "Keep Best 20",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [\n    {\n      parts: [\n        {\n          text: \"Create a professional ATS-friendly resume tailored to this job.\\n\\n\" +\n            \"CANDIDATE PROFILE:\\n\" +\n            JSON.stringify($('Parse Candidate Profile').first().json.profile) +\n            \"\\n\\nJOB INFORMATION:\\n\" +\n            JSON.stringify($json) +\n            \"\\n\\nIMPORTANT RULES:\\n\" +\n            \"1. Use ONLY information present in the candidate profile.\\n\" +\n            \"2. Do not invent skills, experience, companies, education, projects, certifications, achievements, or dates.\\n\" +\n            \"3. Tailor the resume toward the job requirements.\\n\" +\n            \"4. Keep the resume professional and ATS-friendly.\\n\" +\n            \"5. Return ONLY the resume text.\\n\" +\n            \"6. Do NOT return JSON.\\n\" +\n            \"7. Do NOT use markdown code fences.\"\n        }\n      ]\n    }\n  ]\n}) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 3000
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "b5207f35-959f-47d0-bb5a-ee3c2a3aba25",
+      "name": "OpenAI - Create ATS Resume",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1232,
+        240
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const data = item.json;\n\n  const raw =\n    data.candidates?.[0]?.content?.parts?.[0]?.text ??\n    data.body?.candidates?.[0]?.content?.parts?.[0]?.text ??\n    data.response?.candidates?.[0]?.content?.parts?.[0]?.text ??\n    data.text ??\n    data.output ??\n    '';\n\n  return {\n    json: {\n      ...data,\n      resume_text: String(raw || '').trim()\n    }\n  };\n});"
+      },
+      "id": "52dd62c9-8209-479d-9800-f0867e0df394",
+      "name": "Parse ATS Resume",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Jobs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "job_title": "={{ $('Keep Best 20').item.json.job_title }}",
+            "company": "={{ $('Keep Best 20').item.json.company }}",
+            "location": "={{ $('Keep Best 20').item.json.location }}",
+            "job_url": "={{ $('Keep Best 20').item.json.job_url }}",
+            "work_mode": "={{ $('Keep Best 20').item.json.work_mode }}",
+            "experience_required": "={{ $('Keep Best 20').item.json.experience_required }}",
+            "match_score": "={{ $('Active + Eligible + 70%').item.json.match_score }}",
+            "eligible": "={{ $('Active + Eligible + 70%').item.json.eligible }}",
+            "is_individual_job": "={{ $('Active + Eligible + 70%').item.json.is_individual_job }}",
+            "role_match": "={{ $('Parse Match').item.json.skill_match }}",
+            "experience_match": "={{ $('Active + Eligible + 70%').item.json.experience_match }}",
+            "skill_match": "={{ $('Active + Eligible + 70%').item.json.skill_match }}",
+            "project_match": "={{ $('Active + Eligible + 70%').item.json.project_match }}",
+            "education_match": "={{ $('Active + Eligible + 70%').item.json.education_match }}",
+            "location_workmode_match": "={{ $('Active + Eligible + 70%').item.json.location_workmode_match }}",
+            "matched_skills": "={{ $('Active + Eligible + 70%').item.json.matched_skills }}",
+            "missing_skills": "={{ $('Active + Eligible + 70%').item.json.missing_skills }}",
+            "required_skills_missing": "={{ $('Active + Eligible + 70%').item.json.required_skills_missing }}",
+            "preferred_skills_missing": "={{ $('Active + Eligible + 70%').item.json.preferred_skills_missing }}",
+            "reason": "={{ $('Active + Eligible + 70%').item.json.reason }}",
+            "ats_resume_url": "={{ $json.webViewLink }}",
+            "application_status": "apply"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "job_title",
+              "displayName": "job_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "job_url",
+              "displayName": "job_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "work_mode",
+              "displayName": "work_mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "experience_required",
+              "displayName": "experience_required",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "match_score",
+              "displayName": "match_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "eligible",
+              "displayName": "eligible",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "is_individual_job",
+              "displayName": "is_individual_job",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "role_match",
+              "displayName": "role_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "skill_match",
+              "displayName": "skill_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "experience_match",
+              "displayName": "experience_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "project_match",
+              "displayName": "project_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "education_match",
+              "displayName": "education_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "location_workmode_match",
+              "displayName": "location_workmode_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "matched_skills",
+              "displayName": "matched_skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "missing_skills",
+              "displayName": "missing_skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "required_skills_missing",
+              "displayName": "required_skills_missing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "preferred_skills_missing",
+              "displayName": "preferred_skills_missing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ats_resume_url",
+              "displayName": "ats_resume_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "application_status",
+              "displayName": "application_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "6a46a855-a590-4cc6-9a05-253f9cca1c34",
+      "name": "Google Sheets - Save Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        464,
+        528
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "= {{JSON.stringify({\n  contents: [\n    {\n      parts: [\n        {\n          text: \"Analyze the resume below and return ONLY valid JSON. \" +\n            \"Do not use markdown or code fences. \" +\n            \"Extract information directly from the resume.\\n\\n\" +\n\n            \"Return exactly this structure:\\n\" +\n            \"{\\\"name\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"phone\\\":\\\"\\\",\\\"education\\\":\\\"\\\",\\\"experience\\\":\\\"\\\",\\\"skills\\\":[],\\\"projects\\\":[],\\\"preferred_roles\\\":[],\\\"preferred_locations\\\":[],\\\"work_mode\\\":\\\"\\\",\\\"years_experience\\\":\\\"\\\"}\\n\\n\" +\n\n            \"Rules:\\n\" +\n            \"- skills must be an array of individual skills.\\n\" +\n            \"- projects must be an array.\\n\" +\n            \"- preferred_roles must be inferred from the candidate's actual skills, technologies, projects and experience.\\n\" +\n            \"- Do NOT automatically choose Data Analyst.\\n\" +\n            \"- preferred_locations should only contain locations explicitly stated in the resume; otherwise use an empty array.\\n\" +\n            \"- work_mode should only contain information explicitly stated in the resume.\\n\" +\n            \"- years_experience should only contain experience supported by the resume.\\n\" +\n            \"- Never invent information.\\n\\n\" +\n\n            \"RESUME:\\n\" +\n            String($json.text || \"\")\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    temperature: 0,\n    responseMimeType: \"application/json\"\n  }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        544,
+        -384
+      ],
+      "id": "c64a3216-3c02-4e7c-836e-8e1c9fc3a2a0",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI job matching system.\n\nYour task is to evaluate the INDIVIDUAL JOB represented by the provided job data against the candidate.\n\n========================\nCANDIDATE\n========================\n\nCANDIDATE RESUME:\n{{ $json.candidate_resume }}\n\nCANDIDATE PROFILE:\n{{ JSON.stringify($json.candidate_profile) }}\n\n========================\nJOB DATA\n========================\n\n{{ JSON.stringify($json) }}\n\n========================\nHOW TO IDENTIFY THE JOB\n========================\n\nIMPORTANT:\n\nThe input contains an individual job URL.\n\nUse the following URL fields in this priority order:\n\n1. individual_job_url\n2. original_job_url\n3. url\n\nIf any of these fields contains a URL, return that EXACT URL as \"job_url\".\n\nNEVER invent, modify, shorten, or replace the URL.\n\nThe job content may be contained inside:\n- title\n- snippet\n- rawContent\n- description\n- content\n- job_title\n- company\n- location\n- work_mode\n- experience_required\n- skills\n- requirements\n\nRead ALL available fields in JOB DATA.\n\n========================\nINDIVIDUAL JOB RULE\n========================\n\nThe field \"individual_job_url\" identifies the specific job that must be evaluated.\n\nIf \"individual_job_url\" exists and points to one specific job URL:\n\n\"is_individual_job\": true\n\nEven if the search snippet contains text from other jobs, evaluate ONLY the job associated with \"individual_job_url\".\n\nDo NOT evaluate unrelated jobs appearing in the snippet.\n\nDo NOT set is_individual_job=false merely because the snippet contains additional job text.\n\nSet \"is_individual_job\": false ONLY when there is no identifiable individual job URL and the input is clearly a search-results page, category page, jobs collection, or multiple jobs without a specific job URL.\n\n========================\nJOB INFORMATION EXTRACTION\n========================\n\nExtract the job title from the job data.\n\nIf the title field contains a search-page title such as:\n\n\"Company is hiring Full Stack Developer job (Remote only) | Cutshort\"\n\nextract the actual job role:\n\n\"Full Stack Developer\"\n\nExtract the company name from the available job data.\n\nIf the company is explicitly present in the title, URL, snippet, or another job field, use it.\n\nDo NOT invent information.\n\nFor the job URL, ALWAYS prioritize:\n\nindividual_job_url\n\nand return it exactly.\n\nFor example, if:\n\nindividual_job_url = \"https://cutshort.io/job/Full-Stack-Developer-Matellio-India-Private-Limited-rPHzBY0A\"\n\nthen:\n\n\"job_url\": \"https://cutshort.io/job/Full-Stack-Developer-Matellio-India-Private-Limited-rPHzBY0A\"\n\nDo not change it.\n\n========================\nMATCHING\n========================\n\nCompare the candidate against the identified individual job.\n\nConsider:\n\n1. Job title\n2. Job responsibilities\n3. Required skills\n4. Preferred skills\n5. Experience requirements\n6. Education requirements\n7. Candidate projects\n8. Candidate work experience\n9. Location\n10. Work mode\n\nConsider equivalent and transferable skills.\n\nDo not require exact wording when the candidate clearly has an equivalent skill.\n\n========================\nSCORING\n========================\n\nGive each category a score from 0 to 100.\n\nrole_match:\nHow closely the candidate's experience and preferred roles match the job role.\n\nskill_match:\nHow closely the candidate's skills match the job skills.\n\nexperience_match:\nHow closely the candidate's experience matches the job requirement.\n\nproject_match:\nHow relevant the candidate's projects are to the job.\n\neducation_match:\nHow well the candidate's education matches the job.\n\nlocation_workmode_match:\nHow well the candidate's work-mode preference matches the job.\n\nCalculate:\n\nmatch_score =\n(role_match * 0.25) +\n(skill_match * 0.30) +\n(experience_match * 0.15) +\n(project_match * 0.15) +\n(education_match * 0.05) +\n(location_workmode_match * 0.10)\n\nRound to the nearest whole number.\n\nmatch_score MUST be between 0 and 100.\n\n========================\nIMPORTANT SCORING RULE\n========================\n\nDo NOT return match_score = 0 merely because some job fields are missing.\n\nIf the job title, URL and job description/snippet provide enough information to evaluate the candidate, calculate a real score.\n\nOnly use 0 when there is genuinely no usable job information.\n\n========================\nELIGIBILITY\n========================\n\neligible = true when:\n\n- is_individual_job = true\n- match_score >= 60\n- there is no clearly disqualifying mandatory requirement\n\nOtherwise:\n\neligible = false\n\n========================\nSKILL EXTRACTION RULES\n========================\n\nYou MUST actively extract and compare job skills.\n\nmatched_skills:\nList the specific skills and technologies mentioned in the job that the candidate already has according to the resume.\n\nmissing_skills:\nList the specific skills and technologies mentioned in the job that the candidate does not clearly have.\n\nrequired_skills_missing:\nList ONLY skills that are explicitly mandatory, required, or must-have and that the candidate does not have.\n\npreferred_skills_missing:\nList ONLY skills that are explicitly preferred, nice-to-have, bonus, or optional and that the candidate does not have.\n\nIMPORTANT:\n\n- Do not return empty arrays if the job posting contains identifiable skills.\n- Compare the job skills against the entire candidate resume.\n- Consider equivalent and closely related technologies.\n- Use specific skill names such as React.js, Node.js, Python, JavaScript, TypeScript, SQL, MongoDB, AWS, Docker, FastAPI, etc.\n- Do not invent skills that are not present in the job posting.\n\n========================\nREASON\n========================\n\nGive a concise reason explaining:\n\n- why the candidate matches the role\n- strongest matching skills\n- experience compatibility\n- project compatibility\n- important missing requirements\n- why eligible is true or false\n\n========================\nOUTPUT\n========================\n\nReturn ONLY valid JSON.\n\nDo NOT use Markdown.\nDo NOT use ```json.\nDo NOT add any text before or after the JSON.\n\nIMPORTANT:\n\n- \"job_url\" must be the exact URL from \"individual_job_url\".\n- If \"individual_job_url\" exists, copy it character-for-character into \"job_url\".\n- Never convert the URL into a Markdown link.\n- Never invent a URL.\n- If \"individual_job_url\" does not exist, return \"\" for \"job_url\".\n- If \"individual_job_url\" exists, set \"is_individual_job\": true.\n- Calculate a real \"match_score\" whenever usable job information exists.\n- Do not return match_score = 0 simply because some optional fields are missing.\n\nReturn exactly this JSON structure:\n\n{\n  \"job_title\": \"\",\n  \"company\": \"\",\n  \"job_url\": \"\",\n  \"location\": \"\",\n  \"work_mode\": \"\",\n  \"experience_required\": \"\",\n  \"match_score\": 0,\n  \"eligible\": false,\n  \"is_individual_job\": false,\n  \"role_match\": 0,\n  \"skill_match\": 0,\n  \"experience_match\": 0,\n  \"project_match\": 0,\n  \"education_match\": 0,\n  \"location_workmode_match\": 0,\n  \"matched_skills\": [],\n  \"missing_skills\": [],\n  \"required_skills_missing\": [],\n  \"preferred_skills_missing\": [],\n  \"reason\": \"\"\n}",
+        "batching": {
+          "batchSize": 1,
+          "delayBetweenBatches": 10000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1840,
+        -64
+      ],
+      "id": "8efbb911-2fe2-4f0c-8217-55142ef27dee",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        128
+      ],
+      "id": "99be1689-d145-4798-8f10-3fb338b77e75",
+      "name": "Google Gemini Chat Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items\n  .filter(item => {\n    const url = item.json.url || item.json.link || '';\n\n    return url.includes('cutshort.io/job/');\n  })\n  .map(item => {\n    const url = item.json.url || item.json.link;\n\n    return {\n      json: {\n        ...item.json,\n        individual_job_url: url\n      }\n    };\n  });"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -64
+      ],
+      "id": "5f392818-e02c-4240-a180-7b3dad3a6f21",
+      "name": "Filter Individual Job URLs"
+    },
+    {
+      "parameters": {
+        "jsCode": "const candidate =\n  $('Automatic Search Settings').first().json.profile || {};\n\nreturn $input.all().map(item => {\n  const job = item.json;\n\n  return {\n    json: {\n      ...job,\n\n      original_job_url:\n        job.individual_job_url ||\n        job.url ||\n        job.job_url ||\n        \"\",\n\n      candidate_profile: candidate\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        -64
+      ],
+      "id": "bd830a9b-36f7-4626-9634-3cb01f9762c6",
+      "name": "Attach Candidate Profile"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "resume_text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2032,
+        240
+      ],
+      "id": "45a35c0e-35c9-4d66-8fc5-8225311ead48",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "name": "={{$binary.data.fileName}}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "list",
+          "cachedResultName": "ai finder ",
+          "cachedResultUrl": "YOUR_GOOGLE_DRIVE_FOLDER_URL"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        64,
+        528
+      ],
+      "id": "07d4bef0-c344-4af6-bc26-bd0a060b32bd",
+      "name": "Upload file",
+      "credentials": {}
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Upload Resume": {
+      "main": [
+        [
+          {
+            "node": "Extract Resume Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Resume Text": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Candidate Profile": {
+      "main": [
+        [
+          {
+            "node": "Automatic Search Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Automatic Search Settings": {
+      "main": [
+        [
+          {
+            "node": "Create Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Search Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Real Job Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Real Job Listings": {
+      "main": [
+        [
+          {
+            "node": "Extract Job Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Job Results": {
+      "main": [
+        [
+          {
+            "node": "Filter Individual Job URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates + Limit Jobs": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Best 20": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Create ATS Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Create ATS Resume": {
+      "main": [
+        [
+          {
+            "node": "Parse ATS Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ATS Resume": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parse Candidate Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Active + Eligible + 70%": {
+      "main": [
+        [
+          {
+            "node": "Keep Best 20",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Match": {
+      "main": [
+        [
+          {
+            "node": "Active + Eligible + 70%",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Individual Job URLs": {
+      "main": [
+        [
+          {
+            "node": "Attach Candidate Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Candidate Profile": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates + Limit Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Upload file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload file": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Save Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "bf939c66-a2b5-46b2-a765-16e23ec74341",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "REMOVED"
+  },
+  "nodeGroups": [],
+  "id": "32EIiHic5hS11tXb",
+  "tags": []
+}
