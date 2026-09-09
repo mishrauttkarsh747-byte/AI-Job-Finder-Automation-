@@ -1,0 +1,26 @@
+const roles = Array.isArray($json.searchRoles)
+  ? $json.searchRoles
+  : [];
+
+const locations = Array.isArray($json.searchLocations)
+  ? $json.searchLocations
+  : ['India', 'Remote', 'Worldwide'];
+
+const profile = $json.profile || {};
+
+const queries = [];
+
+for (const role of roles) {
+  for (const location of locations) {
+    queries.push({
+      json: {
+        query: `site:cutshort.io/job/ ${role} ${location}`,
+        role: role,
+        location: location,
+        candidate_profile: profile
+      }
+    });
+  }
+}
+
+return queries;
